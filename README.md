@@ -2,7 +2,7 @@
 The controller subscribes to Playback/Capture Rate alsa controls defined by the gadget alsa device and starts/stops appropriate playback/capture processes on the gadget side.
 
 ## Communicating from the Gadget
-When no playback/capture runs on the USB host side or the USB cable is disconnected, the respective Playback/Capture Rate controls report 0. When playback/capture is started, the controls report the actual samplerate in Hz. The default control names are the names hard-coded in the kernel audio gadget code.
+When no playback/capture runs on the USB host side or the USB cable is disconnected, the respective Playback/Capture Rate controls report 0. When playback/capture is started, the controls report the actual samplerate in Hz. The default control names are the names hard-coded in the kernel audio gadget code, configurable with params `-p/--pctl` and `-c/--cctl`.
 
 ## Playback/Capture Processes on the Gadget Side
 The process commands are specified by params `-x/--pcmd` resp. `-y/--ccmd`. The controller executes the commands directly without any shell. Every occurence of string `{R}` are replaced with current samplerate in Hz, as reported by the corresponding alsa control.
