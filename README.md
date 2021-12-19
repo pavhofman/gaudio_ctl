@@ -20,6 +20,6 @@ USB audio drivers of USB hosts test functionality of the USB device during enume
 
 ## Installation
 1. Installing latest stable Rust with [rustup](https://www.rust-lang.org/tools/install).
-2. `cd gadget_ctl directory`
+2. `cd gadget_ctl`
 3. `cargo build --release`
 4. The binary is compiled to `target/release/gadget_ctl`
