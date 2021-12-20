@@ -57,14 +57,6 @@ struct Args {
     ccmd: String,
 }
 
-pub struct ExitRequest {}
-
-impl ExitRequest {
-    pub const NONE: usize = 0;
-    pub const EXIT: usize = 1;
-    pub const STOP: usize = 2;
-}
-
 // messages sent to exec threads
 pub enum Msg {
     // stop exec
