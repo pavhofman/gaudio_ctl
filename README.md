@@ -15,11 +15,14 @@ USB audio drivers of USB hosts test functionality of the USB device during enume
 * If alsaloop is used, the version in alsa-utils 1.2.6 supports Capture/Playback Pitch gadget feedback controls.
 * All required patches for the audio gadget have not been submitted yet, subject to change soon.
 
-## TODO
-* Support for gadget configured with capture/playback only (`p_chmask/c_chmask=0`)
-
 ## Installation
 1. Installing latest stable Rust with [rustup](https://www.rust-lang.org/tools/install).
 2. `cd gadget_ctl`
 3. `cargo build --release`
 4. The binary is compiled to `target/release/gadget_ctl`
+
+## Running
+Alsaloop 1.2.6 is not in raspbian yet, therefore exec commands must be specified appropriately:
+```
+target/release/gaudio_ctl -vv -t -g UAC2Gadget -p "Playback Rate" -c "Capture Rate" -d 40 -x "/home/pi/work/alsa-utils/alsaloop/alsaloop -vvvv -r {R} -S playshift -f S32_LE -C hw:Loopback,1 -P hw:UAC2Gadget  --latency=10000" -y "/home/pi/work/alsa-utils/alsaloop/alsaloop -vvvv -r {R} -S captshift -f S32_LE -P hw:Loopback,1 -C hw:UAC2Gadget --latency=10000"
+```
