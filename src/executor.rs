@@ -1,10 +1,10 @@
-use std::error::Error;
 use std::io;
 use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use anyhow::Result;
 use cancellable_timer::Timer;
 use crossbeam_channel::Receiver;
 use log::{debug, error, trace, warn};
@@ -56,7 +56,7 @@ impl CmdCfg {
     }
 }
 
-pub fn run_exec_thread(data: &mut ExecData, cmd: &mut CmdCfg) -> Result<(), Box<dyn Error>> {
+pub fn run_exec_thread(data: &mut ExecData, cmd: &mut CmdCfg) -> Result<()> {
     loop {
         match data.recv.recv() {
             Ok(msg) => {
@@ -79,7 +79,7 @@ pub fn run_exec_thread(data: &mut ExecData, cmd: &mut CmdCfg) -> Result<(), Box<
     Ok(())
 }
 
-fn handle_new_rate(rate: usize, data: &mut ExecData, cmd: &mut CmdCfg) -> Result<(), Box<dyn Error>> {
+fn handle_new_rate(rate: usize, data: &mut ExecData, cmd: &mut CmdCfg) -> Result<()> {
     debug!("{}: Received new rate: {}", data.dir, rate);
     let (do_kill, do_start) = decide_kill_run(data.rate, rate);
     if do_kill {

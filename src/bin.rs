@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::ffi::CString;
 use std::fmt::Debug;
 use std::io::Write;
@@ -10,6 +9,7 @@ use std::time::Instant;
 use alsa::Ctl;
 use alsa::ctl::{ElemId, ElemIface};
 use alsa::hctl::{Elem, HCtl};
+use anyhow::{anyhow, Result};
 use cancellable_timer::{Canceller, Timer};
 use clap::Parser;
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -19,7 +19,6 @@ use log::{debug, info, LevelFilter, trace};
 use executor::{CmdCfg, ExecData};
 
 mod executor;
-
 
 #[derive(Parser, Debug)]
 #[clap(about, version, author)]
@@ -89,87 +88,98 @@ impl ExecLocData {
     }
 }
 
-fn main() {
-    let code = match main_exec() {
-        Ok(_) => 0,
-        Err(_) => -1,
-    };
-    std::process::exit(code);
+struct CtlData<'a> {
+    elem: Elem<'a>,
+    numid: u32,
 }
 
-fn main_exec() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<()> {
     let args: Args = Args::parse();
     init_logging(&args);
     debug!("{:#?}", args);
 
-    let (p_exec, p_args) = parse_cmd(args.pcmd, "playback");
-    let (c_exec, c_args) = parse_cmd(args.ccmd, "capture");
+    let devname = format!("hw:{}", args.gadget_name).to_string();
 
-    let mut c_cmd = CmdCfg::new(c_exec, c_args);
-    let mut p_cmd = CmdCfg::new(p_exec, p_args);
+    // initializing rate ctrls and corresponding executors
+    let h = HCtl::new(&devname, false)?;
+    h.load()?;
 
-    let (p_timer, p_canceller) = Timer::new2().unwrap();
-    let (c_timer, c_canceller) = Timer::new2().unwrap();
+    let c_ctl_data = get_ctl_data(&h, args.cctl.as_str())?;
+    let mut c_exec_data = match c_ctl_data {
+        Some(_) => {
+            trace!("Ctl '{}' found, will start capture exec", args.cctl);
+            Some(init_executor("Capture", args.ccmd, args.timeout)?)
+        }
+        None => {
+            info!("Ctl '{}' not found, will not start capture exec", args.cctl);
+            None
+        }
+    };
 
-    let (p_sender, p_recv) = unbounded();
-    let (c_sender, c_recv) = unbounded();
-    let p_debouncing = Arc::new(AtomicBool::new(false));
-    let c_debouncing = Arc::new(AtomicBool::new(false));
+    let p_ctl_data = get_ctl_data(&h, args.pctl.as_str())?;
+    let mut p_exec_data = match p_ctl_data {
+        Some(_) => {
+            trace!("Ctl '{}' found, will start playback exec", args.pctl);
+            Some(init_executor("Playback", args.pcmd, args.timeout)?)
+        }
+        None => {
+            info!("Ctl '{}' not found, will not start playback exec", args.pctl);
+            None
+        }
+    };
 
-    let mut p_thread_data = ExecData::new("Playback", p_timer, args.timeout, p_debouncing.clone(), p_recv.clone());
-    let mut c_thread_data = ExecData::new("Capture", c_timer, args.timeout, c_debouncing.clone(), c_recv.clone());
-
-    let mut p_loc_data = ExecLocData::new("Playback", p_canceller, p_debouncing, p_sender, p_recv);
-    let mut c_loc_data = ExecLocData::new("Capture", c_canceller, c_debouncing, c_sender, c_recv);
-
-    thread::Builder::new()
-        .name("Playback Thread".to_string())
-        .spawn(move || {
-            executor::run_exec_thread(&mut p_thread_data, &mut p_cmd).unwrap();
-        })?;
-    thread::Builder::new()
-        .name("Capture Thread".to_string())
-        .spawn(move || {
-            executor::run_exec_thread(&mut c_thread_data, &mut c_cmd).unwrap();
-        })?;
-
-    let c_srate_name = args.cctl.as_str();
-    let p_srate_name = args.pctl.as_str();
-
-    let cardname = args.gadget_name;
-    let devname = format!("hw:{}", cardname).to_string();
-
-    // initializing rate ctrls
-    let h: HCtl = HCtl::new(&devname, false).unwrap();
-    h.load().unwrap();
-    let elem_crate = get_elem(c_srate_name, &h)
-        .expect(format!("Capture rate ctl '{}' not found", c_srate_name).as_str());
-    let crate_id = elem_crate.get_id().unwrap().get_numid();
-    debug!("{} id {}", c_srate_name, crate_id);
-
-    let elem_prate = get_elem(p_srate_name, &h)
-        .expect(format!("Playback rate ctl '{}' not found", p_srate_name).as_str());
-    let prate_id = elem_prate.get_id().unwrap().get_numid();
-    debug!("{} id {}", p_srate_name, prate_id);
+    if c_ctl_data.is_none() && p_ctl_data.is_none() {
+        return Err(anyhow!("Neither capture nor playback rate controls found, exiting"));
+    }
 
     // subscribing for blocking ctl.read
-    let ctl = Ctl::new(&devname, false).unwrap();
-    ctl.subscribe_events(true).unwrap();
+    let ctl = Ctl::new(&devname, false)?;
+    ctl.subscribe_events(true)?;
     loop {
-        let result = ctl.read();
-        let event = result.unwrap().unwrap();
-
+        let event = ctl.read()?.unwrap();
         // determining event control
         let numid = event.get_id().get_numid();
         trace!("Received event: elem num ID {}, index {}, mask {}", numid, event.get_id().get_index(), event.get_mask().0);
-        if numid == crate_id {
+        if fits_numid(&c_ctl_data, numid) {
             // capture rate
-            send_new_rate(&elem_crate, &mut c_loc_data, args.show_timing)?;
-        } else if numid == prate_id {
+            send_new_rate(&c_ctl_data.as_ref().unwrap().elem, c_exec_data.as_mut().unwrap(), args.show_timing)?;
+        } else if fits_numid(&p_ctl_data, numid) {
             // playback rate
-            send_new_rate(&elem_prate, &mut p_loc_data, args.show_timing)?;
+            send_new_rate(&p_ctl_data.as_ref().unwrap().elem, p_exec_data.as_mut().unwrap(), args.show_timing)?;
         }
     }
+}
+
+#[inline]
+fn fits_numid(ctl_data: &Option<CtlData>, numid: u32) -> bool {
+    ctl_data.is_some() && ctl_data.as_ref().unwrap().numid == numid
+}
+
+fn init_executor(dir: &str, cmd: String, timeout: usize) -> Result<ExecLocData> {
+    let (c_exec, c_args) = parse_cmd(cmd, dir);
+    let mut c_cmd = CmdCfg::new(c_exec, c_args);
+    let (c_timer, c_canceller) = Timer::new2()?;
+    let (c_sender, c_recv) = unbounded();
+    let c_debouncing = Arc::new(AtomicBool::new(false));
+    let mut c_thread_data = ExecData::new(dir, c_timer, timeout, c_debouncing.clone(), c_recv.clone());
+    thread::Builder::new()
+        .name(format!("{} Thread", dir))
+        .spawn(move || {
+            executor::run_exec_thread(&mut c_thread_data, &mut c_cmd).unwrap();
+        })?;
+    let data = ExecLocData::new(dir, c_canceller, c_debouncing, c_sender, c_recv);
+    Ok(data)
+}
+
+fn get_ctl_data<'a>(h: &'a HCtl, elem_name: &'a str) -> Result<Option<CtlData<'a>>> {
+    return match get_elem(elem_name, &h)? {
+        Some(elem) => {
+            let numid = elem.get_id()?.get_numid();
+            debug!("{} id {}", elem_name, numid);
+            Ok(Some(CtlData { elem, numid }))
+        }
+        None => Ok(None)
+    };
 }
 
 fn parse_cmd(cmd: String, dir: &str) -> (String, Vec<String>) {
@@ -195,8 +205,8 @@ fn init_logging(args: &Args) {
         .init();
 }
 
-fn send_new_rate(elem: &Elem, data: &mut ExecLocData, show_timing: bool) -> Result<(), Box<dyn Error>> {
-    let rate = read_value(Some(&elem)).unwrap() as usize;
+fn send_new_rate(elem: &Elem, data: &mut ExecLocData, show_timing: bool) -> Result<()> {
+    let rate = read_value(&elem)?.unwrap() as usize;
     debug!("{}: New rate value: {}", data.dir, rate);
     if show_timing {
         print_timing(data, rate)
@@ -230,17 +240,17 @@ fn print_timing(data: &mut ExecLocData, rate: usize) {
     }
 }
 
-fn get_elem<'a>(elemname: &str, h: &'a HCtl) -> Option<Elem<'a>> {
+fn get_elem<'a>(elemname: &str, h: &'a HCtl) -> Result<Option<Elem<'a>>> {
     let mut elid = ElemId::new(ElemIface::PCM);
     elid.set_device(0);
     elid.set_subdevice(0);
-    elid.set_name(&CString::new(elemname).unwrap());
+    elid.set_name(&CString::new(elemname)?);
     let elem = h.find_elem(&elid);
-    elem
+    Ok(elem)
 }
 
-fn read_value(elem: Option<&Elem>) -> Option<i32> {
-    let value = elem.unwrap().read().unwrap();
+fn read_value(elem: &Elem) -> Result<Option<i32>> {
+    let value = elem.read()?;
     let rate = value.get_integer(0);
-    rate
+    Ok(rate)
 }
