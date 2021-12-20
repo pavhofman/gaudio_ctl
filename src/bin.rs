@@ -25,7 +25,7 @@ mod executor;
 #[clap(about, version, author)]
 struct Args {
     /// Debouncing timeout in ms, 0 = no debouncing
-    #[clap(short = 'd', long, default_value_t = 100)]
+    #[clap(short = 'd', long, default_value_t = 50)]
     timeout: usize,
 
     /// Verbose (-v = debug, -vv = trace)
