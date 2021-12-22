@@ -7,6 +7,10 @@ When no playback/capture runs on the USB host side or the USB cable is disconnec
 ## Playback/Capture Processes on the Gadget Side
 The process commands are specified by params `-x/--pcmd` resp. `-y/--ccmd`. The controller executes the commands directly without any shell. Every occurence of string `{R}` is replaced with current samplerate in Hz, as reported by the corresponding alsa control.
 The default commands run alsaloop to Loopback devices.
+### Capture
+The direction notation is from the gadget view (same as the gaudio alsa notation). **Capture means FROM the gadget alsa device** (i.e. playback from the USB host view).
+### Playback
+**Playback means TO the gadget alsa device** (i.e. capture from the USB host view)
 
 ## Debouncing
 USB audio drivers of USB hosts test functionality of the USB device during enumeration. Also pulseaudio tries to open alsa devices. In order to avoid bounced starting/killing the gadget-side processes, the controller implements a debouncer, delaying start of the respective process by a timeout in param `-d/--timeout`. Value 0 disables the debouncing. With parameter `-t/--show-timing` the controller measures and reports the time between start and stop events, allowing to set debouncing timeout optimal for the specific usage. The optimal value is slightly larger than the maximum reported stop-start time when plugging the USB cable in. My linux host enumeration bounces take around 25ms, therefore the default value is set to 50 ms. That means that at every playback/capture start on the USB host the first 50ms of data will be lost, but the controller will not run any process on the gadget side during enumeration.
