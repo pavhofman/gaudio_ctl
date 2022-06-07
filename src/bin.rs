@@ -156,18 +156,18 @@ fn fits_numid(ctl_data: &Option<CtlData>, numid: u32) -> bool {
 }
 
 fn init_executor(dir: &str, cmd: String, timeout: usize) -> Result<ExecLocData> {
-    let (c_exec, c_args) = parse_cmd(cmd, dir);
-    let mut c_cmd = CmdCfg::new(c_exec, c_args);
-    let (c_timer, c_canceller) = Timer::new2()?;
-    let (c_sender, c_recv) = unbounded();
-    let c_debouncing = Arc::new(AtomicBool::new(false));
-    let mut c_thread_data = ExecData::new(dir, c_timer, timeout, c_debouncing.clone(), c_recv.clone());
+    let (exec, c_args) = parse_cmd(cmd, dir);
+    let mut cmd_cfg = CmdCfg::new(exec, c_args);
+    let (timer, canceller) = Timer::new2()?;
+    let (sender, recv) = unbounded();
+    let debouncing = Arc::new(AtomicBool::new(false));
+    let mut thread_data = ExecData::new(dir, timer, timeout, debouncing.clone(), recv.clone());
     thread::Builder::new()
         .name(format!("{} Thread", dir))
         .spawn(move || {
-            executor::run_exec_thread(&mut c_thread_data, &mut c_cmd).unwrap();
+            executor::run_exec_thread(&mut thread_data, &mut cmd_cfg).unwrap();
         })?;
-    let data = ExecLocData::new(dir, c_canceller, c_debouncing, c_sender, c_recv);
+    let data = ExecLocData::new(dir, canceller, debouncing, sender, recv);
     Ok(data)
 }
 
